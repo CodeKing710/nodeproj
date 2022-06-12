@@ -1,0 +1,495 @@
+#! /bin/sh
+#This script assumes you have Git, GitHub CLI and Node.js installed!
+#SASS option requires VSCode and Live SASS Compiler to work correctly
+#Defaults
+LPATH=$(pwd)
+PROJNAME=project
+GHR=false
+VIEWS=false
+SQL=false
+TS=false
+SASS=false
+README=false
+version="1.0.1"
+HELP=$(cat <<-HELP
+How to use nodeproj [-n] [NAME] [args]:
+To access this menu again, use nodeproj [-h | --help]
+
+    -v | --version       | Returns current version
+    -n | --name          | Accepts a string for the project name
+    -g | --github-repo   | Make your project on github
+    -V | --views         | Create for view server
+    -s | --sql           | Create and install necessary SQL drivers and ORMs
+    -m | --mongo         | Create and install necessary MongoDB drivers and ODMs
+    -t | --typescript    | Makes a TypeScript Project
+    -S | --sass          | Sets up use for Live SASS Compiler on VSCode
+    -r | --readme        | Creates readme for project
+HELP
+)
+
+ENV=$(cat <<-ENV
+PORT=3000
+KEY=oiunrpiyu97n7ns87nf72n4njb97ghsdfbn2
+DB_URI=
+ENV
+)
+
+SASSSET=$(cat <<-SASS
+{
+  "liveSassCompile.settings.formats": [{
+    "format": "expanded",
+    "extensionName": ".css",
+    "savePath": "/public/css"
+  }]
+}
+SASS
+)
+
+#Dictionaries with file contents saved as heredocs
+declare -A FILES
+declare -A TSFILES
+TSFILES[conf]=$(cat <<-CONF
+{
+  "include": ["src/**/*"],
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "NodeNext",
+    "rootDir": "./src",
+    "moduleResolution": "node",
+    "allowJs": true,
+    "outDir": "./build",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "skipLibCheck": true
+  }
+}
+CONF
+)
+
+TSFILES[ignore]=$(cat <<-LIST
+node_modules
+.env
+build
+LIST
+)
+
+TSFILES[server]=$(cat <<-INIT
+(async () => {
+  import 'dotenv/config';
+  import express, {Request, Response} from 'express';
+  import ejs from 'ejs';
+  import * as _routes from './routes';
+  import * as _utils from './utils';
+
+  const app = express();
+  const PORT = process.env.PORT ?? 3000;
+
+  declare module 'express-session' {
+    interface Session {
+      userid?: string | number
+    }
+  }
+  interface Routes {
+    [index: string | number]: any
+  }
+
+  app.set('view engine','ejs');
+  app.use(express.json());
+  app.use(express.static('public',{}));
+  app.use(express.urlencoded({extended:true}));
+  app.use(_utils.addVarsToTemplate());
+
+  const routes: Routes = _routes;
+  for(const route in routes) {
+    app.use(routes[route].path, routes[route].ctrl);
+  }
+
+  app.get('*', (req: Request, res: Response) => {
+    res.status(404).render('404');
+  });
+
+  app.listen(PORT, () => {console.log(\`Listening on port \${PORT}...\`);});
+})();
+INIT
+)
+
+TSFILES[rIndex]=$(cat <<-ROUTE
+import main from './main';
+
+//Add more routes in this fashion
+export const _main = {path: '/', ctrl: main};
+ROUTE
+)
+
+TSFILES[rMain]=$(cat <<-ROUTE
+import {Request, Response, Router} from 'express';
+
+const main = Router();
+
+main.get('/', (req: Request, res: Response) => {
+  res.status(200).render('home');
+});
+
+export default main;
+ROUTE
+)
+
+TSFILES[uIndex]=$(cat <<-UTIL
+import addVarsToTemplate from './addVarsToTemplate';
+
+export const renderLocals = addVarsToTemplate;
+UTIL
+)
+
+TSFILES[uMain]=$(cat <<-UTIL
+import {Request, Response} from 'express';
+
+export default function(vars: object) {
+  return function(req: Request, res: Response, next: Function) {
+    if(typeof vars === 'object') {
+      req.app.locals = { ...(req.app.locals), ...vars};
+    }
+    req.app.locals.userid = req.session?.userid ?? 'guest';
+    next();
+  }
+}
+UTIL
+)
+
+TSFILES[mongoIndex]=$(cat <<-DB
+import {connect, model} from 'mongoose';
+import userSchema from './user';
+
+connect(process.env.DB_URI,{
+  useUnifiedTopology: true,
+  useNewUrlParser: true
+});
+
+export const User = model('User', userSchema);
+DB
+)
+
+TSFILES[mongoUser]=$(cat <<-DB
+import mongoose, {Schema} from 'mongoose';
+
+export interface IUser {
+  username: string
+  password: string
+}
+
+const userSchema = new Schema<IUser>({
+  username: {type: String, required: true},
+  password: {type: String, required: true}
+});
+
+export default userSchema;
+DB
+)
+
+FILES[ignore]=$(cat <<-LIST
+node_modules
+.env
+LIST
+)
+
+FILES[server]=$(cat <<-INIT
+(async () => {
+  require('dotenv').config();
+
+  const express = require('express');
+  const ejs = require('ejs');
+  const app = express();
+  const PORT = process.env.PORT ?? 3000;
+  const routes = require('./routes');
+  const utils = require('./utils');
+
+  app.set('view engine','ejs');
+  app.use(express.json());
+  app.use(express.static("public"));
+  app.use(express.urlencoded({extended: true}));
+  app.use(utils.addVarsToTemplate());
+
+  for(const route in routes) {
+    app.use(routes[route].path, routes[route].ctrl);
+  }
+
+  app.get('*', (req, res) => {
+    res.status(404).render('404');
+  });
+
+  app.listen(PORT, console.log(\`Listening on port \${PORT}...\`));
+})();
+INIT
+)
+
+FILES[rIndex]=$(cat <<-ROUTE
+//Add route controllers here
+exports.main = {path: '/', ctrl: require("./main")};
+ROUTE
+)
+
+FILES[rMain]=$(cat <<-ROUTE
+//PATH: origin/
+const main = require("express").Router();
+
+//Routes
+main.get('/', (req, res) => {
+  res.status(200).render('404');
+});
+
+module.exports = main;
+ROUTE
+)
+
+FILES[uIndex]=$(cat <<-UTIL
+exports.addVarsToTemplate = require("./addVarsToTemplate");
+UTIL
+)
+
+FILES[uMain]=$(cat <<-UTIL
+module.exports = function (vars) {
+  return function (req, res, next) {
+    if(typeof vars === 'object') {
+      req.app.locals = { ...(req.app.locals), ...vars}
+    }
+    req.app.locals.userid = req.session?.userid ?? 'guest';
+    next();
+  };
+};
+UTIL
+)
+
+FILES[mongoIndex]=$(cat <<-DB
+const mongoose = require('mongoose');
+
+mongoose.connect(process.env.DB_URI, {
+  useUnifiedTopology: true,
+  useNewUrlParser: true
+});
+
+//Add more Schemas and Models below (Try to match name of model to export name)
+exports.User = require("./user");
+DB
+)
+
+FILES[mongoUser]=$(cat <<-DB
+const mongoose = require('mongoose');
+
+const userSchema = mongoose.Schema({
+  username: {type: String, required: true},
+  password: {type: String, required: true}
+});
+
+module.exports = mongoose.model("User", userSchema);
+DB
+)
+
+#Parse args
+while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
+  case "$1" in
+    -v | --version )
+      echo $version
+      exit
+      ;;
+
+    -h | --help )
+      echo "$HELP"
+      exit
+      ;;
+
+    -n | --name )
+      shift
+      if [[ "$1" =~ ^- ]]; then
+        echo "No name specified!"
+      else
+        PROJNAME="$1"
+      fi
+      ;;
+
+    -g | --github-repo )
+      GHR=true
+      ;;
+
+    -V | --views )
+      VIEWS=true
+      ;;
+
+    -s | --sql )
+      SQL=true
+      ;;
+
+    -m | --mongo )
+      SQL=false
+      ;;
+
+    -t | --typescript )
+      TS=true
+      ;;
+
+    -S | --sass )
+      SASS=true
+      ;;
+
+    -r | --readme )
+      README=true
+      ;;
+
+  esac
+  shift
+done
+if [[ "$1" == '--' ]]; then shift; fi
+
+#Main program
+#Check if project name is default
+if [[ $PROJNAME == "project" ]]; then
+  echo "Default Project Name still selected, would you like to continue? [Y/n]"
+  read yn
+  if [[ $yn == 'N' || $yn == 'n' ]]; then
+    exit
+  fi
+fi
+
+#Github upload check
+if [[ $GHR == true ]]; then
+  gh repo create $PROJNAME -c --public
+  cd $PROJNAME
+else
+  mkdir $PROJNAME
+  cd $PROJNAME
+  #Still makes a git project, just no github upload
+  git init
+fi
+
+
+#Instantiate node project
+npm init -y
+
+#Make and populate .env
+touch .env
+echo "$ENV" > .env
+
+#Check for views enabled server
+if [[ $VIEWS == true ]]; then
+  mkdir "public"
+  cd public
+  mkdir css
+  mkdir js
+  cd ../
+
+  mkdir "views"
+  cd views
+  touch 404.ejs
+  cd ../
+  npm i ejs
+
+  #Do SASS check
+  if [[ $SASS == true ]]; then
+    mkdir ".vscode" && cd ".vscode"
+    touch settings.json
+    echo "$SASSSET" > settings.json
+    cd ../public
+    mkdir scss
+    cd ../
+  fi
+fi
+
+#Readme check
+if [[ $README == true ]]; then
+  touch readme.md
+fi
+
+#Check for typescript
+if [[ $TS == true ]]; then
+  touch tsconfig.json
+  echo "${TSFILES[conf]}" > tsconfig.json
+  touch .gitignore
+  echo "${TSFILES[ignore]}" > .gitignore
+  npm i typescript@next tsc express express-session dotenv @types/node @types/express @types/dotenv @types/express-session
+  mkdir "src"
+  cd src
+  touch server.js
+  echo "${TSFILES[server]}" > server.js
+  mkdir "routes"
+  mkdir "models"
+  mkdir "utils"
+  cd routes
+  touch index.ts
+  touch main.ts
+  echo "${TSFILES[rIndex]}" > index.ts
+  echo "${TSFILES[rMain]}" > main.ts
+  cd ../
+  cd models
+  touch index.ts
+  touch user.ts
+  cd ../
+  cd utils
+  touch index.ts
+  touch addVarsToTemplate.ts
+  echo "${TSFILES[uIndex]}" > index.ts
+  echo "${TSFILES[uMain]}" > addVarsToTemplate.ts
+  cd ../
+  #Handle DB type
+  if [[ $SQL == true ]]; then
+    npm i sequelize mysql2
+    #Later, haven't even done sql in typescript
+  else
+    npm i mongoose
+    cd models
+    echo "${TSFILES[mongoIndex]}" > index.ts
+    echo "${TSFILES[mongoUser]}" >  user.ts
+  cd ../
+  fi
+else
+
+  ##################
+  # Non-TypeScript #
+  ##################
+  touch .gitignore
+  echo "${FILES[ignore]}" > .gitignore 
+  npm i express express-session dotenv
+  touch server.js
+  echo "${FILES[server]}" > server.js
+  mkdir "routes"
+  mkdir "models"
+  mkdir "utils"
+  cd routes
+  touch index.js
+  touch main.js
+  echo "${FILES[rIndex]}" > index.js
+  echo "${FILES[rMain]}" > main.js
+  cd ../
+  cd models
+  touch index.js
+  touch user.js
+  cd ../
+  cd utils
+  touch index.js
+  touch addVarsToTemplate.js
+  echo "${FILES[uIndex]}" > index.js
+  echo "${FILES[uMain]}" > addVarsToTemplate.js
+  cd ../
+
+  #Handle DB type
+  if [[ $SQL == true ]]; then
+    npm i sequelize mysql2
+    #Will add later
+  else
+    npm i mongoose
+    cd models
+    echo "${FILES[mongoIndex]}" > index.js
+    echo "${FILES[mongoUser]}" > user.js
+  cd ../
+  fi
+fi
+
+
+
+#Make initial commit
+cd $LPATH
+git add .
+git commit -m "Project Creation (bash::nodeproj)"
+if [[ $GHR == true ]]; then
+  git push origin main
+fi
