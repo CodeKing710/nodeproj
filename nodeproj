@@ -1,4 +1,4 @@
-#! /bin/sh
+#!/bin/bash
 #This script assumes you have Git, GitHub CLI and Node.js installed!
 #SASS option requires VSCode and Live SASS Compiler to work correctly
 #Defaults
